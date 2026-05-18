@@ -9,6 +9,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import List, Optional
 
+from gui_online import OnlineWindow
+
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
 
@@ -22,7 +24,7 @@ from core.detector import DetectedEvent, EventDetector
 from core.logger import EventLogger
 from core.processing import SpectrumFrame, SpectrumProcessor
 from core.sources import OfflineIQSource
-from main import PROJECT_DIR, format_hz, resolve_plot_path, safe_file_stem, save_spectrogram
+from main import PROJECT_DIR, create_test_output_dirs, format_hz, safe_file_stem, save_spectrogram
 
 
 PRESETS = {
@@ -49,6 +51,7 @@ PRESETS = {
 
 class DetectorApp:
     def __init__(self, root: tk.Tk) -> None:
+        self.online_window = None
         self.root = root
         self.root.title("SDR UAV Detector")
         self.root.geometry("980x720")
@@ -142,15 +145,16 @@ class DetectorApp:
             row=3, column=2, columnspan=2, sticky="w", padx=10, pady=(0, 12)
         )
 
-        ttk.Button(settings, text="Открыть logs", command=lambda: self._open_folder(PROJECT_DIR / "logs")).grid(
+        ttk.Button(settings, text="Открыть reports", command=lambda: self._open_folder(PROJECT_DIR / "outputs", "reports")).grid(
             row=3, column=4, sticky="ew", padx=10, pady=(0, 12)
         )
-        ttk.Button(settings, text="Открыть results", command=lambda: self._open_folder(PROJECT_DIR / "results")).grid(
+        ttk.Button(settings, text="Открыть plots", command=lambda: self._open_folder(PROJECT_DIR / "outputs", "plots")).grid(
             row=3, column=5, sticky="ew", padx=10, pady=(0, 12)
         )
 
         self.start_button = ttk.Button(settings, text="Запустить обработку", command=self._start_processing)
-        self.start_button.grid(row=4, column=4, columnspan=2, sticky="ew", padx=10, pady=(0, 12))
+        self.start_button.grid(row=4, column=4, sticky="ew", padx=10, pady=(0, 12))
+        ttk.Button(settings, text="Открыть online-режим SDR", command=self._open_online).grid(row=4, column=5, sticky="ew", padx=10, pady=(0, 12))
 
         log_frame = ttk.LabelFrame(self.root, text="Журнал выполнения")
         log_frame.grid(row=3, column=0, sticky="nsew", padx=16, pady=(8, 16))
@@ -204,9 +208,19 @@ class DetectorApp:
             self.file_var.set(str(path))
             self._guess_format_from_path(path)
 
-    def _open_folder(self, folder: Path) -> None:
+    def _open_folder(self, folder: Path, subfolder: Optional[str] = None) -> None:
         folder.mkdir(parents=True, exist_ok=True)
-        os.startfile(folder)
+        target = folder
+        if subfolder in {"reports", "plots"}:
+            test_dirs = sorted(
+                [entry for entry in folder.iterdir() if entry.is_dir() and entry.name.startswith("test_")],
+                key=lambda p: p.name,
+            )
+            if test_dirs:
+                target = test_dirs[-1] / subfolder
+                target.mkdir(parents=True, exist_ok=True)
+
+        os.startfile(target)
 
     def _guess_format_from_path(self, path: Path) -> None:
         name = path.name.lower()
@@ -269,9 +283,27 @@ class DetectorApp:
             threshold_db=cfg["threshold_db"],
         )
         detector = EventDetector(confirm_frames=cfg["confirm_frames"], merge_gap_hz=processor.bin_width_hz * 2.0)
-        logger = EventLogger(logs_dir=PROJECT_DIR / "logs", prefix=safe_file_stem(cfg["offline"]))
+        run_ctx = create_test_output_dirs(PROJECT_DIR)
+        run_index = int(run_ctx["run_index"])
+        logger = EventLogger(
+            logs_dir=run_ctx["reports_dir"],
+            prefix=safe_file_stem(cfg["offline"]),
+            report_info={
+                "test_id": f"test_{run_index:03d}",
+                "source_file": str(cfg["offline"]),
+                "iq_format": cfg["format"],
+                "sample_rate_hz": cfg["sample_rate"],
+                "center_freq_hz": cfg["center_freq"],
+                "fft_size": cfg["fft_size"],
+                "threshold_db": cfg["threshold_db"],
+                "confirm_frames": cfg["confirm_frames"],
+                "max_seconds": cfg["max_seconds"],
+            },
+        )
 
-        plot_path = resolve_plot_path(cfg["plot"], cfg["offline"])
+        plot_path = None
+        if cfg["plot"] is not None:
+            plot_path = run_ctx["plots_dir"] / f"{safe_file_stem(cfg['offline'])}.png"
         plot_frames: List[SpectrumFrame] = []
         max_plot_frames = 1000
         plot_stride = 1
@@ -283,6 +315,7 @@ class DetectorApp:
         processed_frames = 0
 
         self.messages.put(("log", "Offline обработка запущена"))
+        self.messages.put(("log", f"Папка теста: {run_ctx['run_dir']}"))
         self.messages.put(("log", f"Файл: {source.path}"))
         self.messages.put(
             (
@@ -348,6 +381,11 @@ class DetectorApp:
             f"bw={format_hz(event.bandwidth_hz)}, "
             f"peak={event.peak_power_db:.1f} dB"
         )
+
+    def _open_online(self) -> None:
+        if self.online_window and self.online_window.top.winfo_exists():
+            self.online_window.top.lift(); return
+        self.online_window = OnlineWindow(self.root)
 
     def _poll_messages(self) -> None:
         while True:
