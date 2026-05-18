@@ -115,3 +115,88 @@ class LiveSDRSource:
             "Для реального приёмника позже будет подключение (но это не точно :)."
         )
 
+
+
+class SyntheticSDRSource:
+    """Синтетический live-источник complex64 для теста online-режима."""
+
+    def __init__(self, sample_rate_hz: float, center_freq_hz: float, block_size: int, burst_interval_sec: float = 1.0, burst_duration_sec: float = 0.2, signal_offset_hz: float = 120_000.0, snr_db: float = 18.0) -> None:
+        self.sample_rate_hz = float(sample_rate_hz)
+        self.center_freq_hz = float(center_freq_hz)
+        self.block_size = int(block_size)
+        self.burst_interval_sec = float(burst_interval_sec)
+        self.burst_duration_sec = float(burst_duration_sec)
+        self.signal_offset_hz = float(signal_offset_hz)
+        self.snr_db = float(snr_db)
+
+    def iter_blocks(self, max_seconds: Optional[float] = None) -> Iterator[IQBlock]:
+        sample_idx = 0
+        max_samples = None if max_seconds is None else int(max_seconds * self.sample_rate_hz)
+        rng = np.random.default_rng(42)
+        while True:
+            if max_samples is not None and sample_idx >= max_samples:
+                break
+            n = self.block_size if max_samples is None else min(self.block_size, max_samples - sample_idx)
+            t = (np.arange(n, dtype=np.float32) + sample_idx) / self.sample_rate_hz
+            noise = (rng.normal(0, 1, n) + 1j * rng.normal(0, 1, n)).astype(np.complex64)
+            noise /= np.sqrt(2.0)
+
+            phase = 2 * np.pi * self.signal_offset_hz * t
+            tone = np.exp(1j * phase).astype(np.complex64)
+            burst_phase = np.mod(t, self.burst_interval_sec)
+            burst_mask = burst_phase < self.burst_duration_sec
+            amp = 10 ** (self.snr_db / 20.0)
+            samples = noise + tone * burst_mask.astype(np.float32) * amp
+            yield IQBlock(samples=samples.astype(np.complex64), start_sample=sample_idx, start_time_s=sample_idx / self.sample_rate_hz)
+            sample_idx += n
+
+
+class SoapySDRSource:
+    def __init__(self, device_args: str, sample_rate_hz: float, center_freq_hz: float, bandwidth_hz: float, gain_db: float, agc: bool, block_size: int) -> None:
+        self.device_args = device_args
+        self.sample_rate_hz = float(sample_rate_hz)
+        self.center_freq_hz = float(center_freq_hz)
+        self.bandwidth_hz = float(bandwidth_hz)
+        self.gain_db = float(gain_db)
+        self.agc = bool(agc)
+        self.block_size = int(block_size)
+
+    def _import_soapy(self):
+        try:
+            import SoapySDR  # type: ignore
+            return SoapySDR
+        except Exception as exc:
+            raise RuntimeError('SoapySDR не установлен. Offline/synthetic режимы доступны без него. Установите SoapySDR и драйвер устройства.') from exc
+
+    def iter_blocks(self, max_seconds: Optional[float] = None) -> Iterator[IQBlock]:
+        SoapySDR = self._import_soapy()
+        dev = SoapySDR.Device(dict(arg.split('=',1) for arg in self.device_args.split(',') if '=' in arg) if self.device_args else {})
+        rx = SoapySDR.SOAPY_SDR_RX
+        ch = 0
+        dev.setSampleRate(rx, ch, self.sample_rate_hz)
+        dev.setFrequency(rx, ch, self.center_freq_hz)
+        if self.bandwidth_hz > 0:
+            dev.setBandwidth(rx, ch, self.bandwidth_hz)
+        if self.agc:
+            dev.setGainMode(rx, ch, True)
+        else:
+            dev.setGainMode(rx, ch, False)
+            dev.setGain(rx, ch, self.gain_db)
+        stream = dev.setupStream(rx, SoapySDR.SOAPY_SDR_CF32)
+        dev.activateStream(stream)
+        sample_idx = 0
+        max_samples = None if max_seconds is None else int(max_seconds * self.sample_rate_hz)
+        try:
+            while True:
+                if max_samples is not None and sample_idx >= max_samples:
+                    break
+                buff = np.empty(self.block_size, dtype=np.complex64)
+                sr = dev.readStream(stream, [buff], len(buff), timeoutUs=200000)
+                if sr.ret <= 0:
+                    continue
+                samples = buff[: sr.ret]
+                yield IQBlock(samples=samples, start_sample=sample_idx, start_time_s=sample_idx / self.sample_rate_hz)
+                sample_idx += samples.size
+        finally:
+            dev.deactivateStream(stream)
+            dev.closeStream(stream)

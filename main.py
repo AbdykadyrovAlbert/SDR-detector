@@ -146,6 +146,27 @@ def resolve_plot_path(plot_arg: Optional[str], source_path: str | Path) -> Optio
     return results_dir / f"{safe_file_stem(source_path)}.png"
 
 
+def create_test_output_dirs(base_dir: Path) -> Dict[str, Any]:
+    runs_root = base_dir / "outputs"
+    runs_root.mkdir(parents=True, exist_ok=True)
+
+    max_index = 0
+    for entry in runs_root.iterdir():
+        if not entry.is_dir() or not entry.name.startswith("test_"):
+            continue
+        suffix = entry.name.removeprefix("test_")
+        if suffix.isdigit():
+            max_index = max(max_index, int(suffix))
+
+    run_index = max_index + 1
+    run_dir = runs_root / f"test_{run_index:03d}"
+    plots_dir = run_dir / "plots"
+    reports_dir = run_dir / "reports"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    return {"run_dir": run_dir, "plots_dir": plots_dir, "reports_dir": reports_dir, "run_index": run_index}
+
+
 def numbered_png_path(base_path: Path, page_index: int) -> Path:
     if page_index == 0:
         return base_path
@@ -267,9 +288,27 @@ def main() -> int:
         threshold_db=cfg["threshold_db"],
     )
     detector = EventDetector(confirm_frames=cfg["confirm_frames"], merge_gap_hz=processor.bin_width_hz * 2.0)
-    logger = EventLogger(logs_dir=PROJECT_DIR / "logs", prefix=safe_file_stem(cfg["offline"]))
+    run_ctx = create_test_output_dirs(PROJECT_DIR)
+    run_index = int(str(run_ctx["run_index"]))
+    logger = EventLogger(
+        logs_dir=run_ctx["reports_dir"],
+        prefix=safe_file_stem(cfg["offline"]),
+        report_info={
+            "test_id": f"test_{run_index:03d}",
+            "source_file": str(cfg["offline"]),
+            "iq_format": cfg["format"],
+            "sample_rate_hz": cfg["sample_rate"],
+            "center_freq_hz": cfg["center_freq"],
+            "fft_size": cfg["fft_size"],
+            "threshold_db": cfg["threshold_db"],
+            "confirm_frames": cfg["confirm_frames"],
+            "max_seconds": cfg["max_seconds"],
+        },
+    )
 
-    plot_path = resolve_plot_path(cfg["plot"], cfg["offline"])
+    plot_path = None
+    if cfg["plot"] is not None:
+        plot_path = run_ctx["plots_dir"] / f"{safe_file_stem(cfg['offline'])}.png"
     plot_frames: List[SpectrumFrame] = []
     max_plot_frames = 1000
     plot_stride = 1
@@ -278,6 +317,7 @@ def main() -> int:
         plot_stride = max(1, math.ceil(estimated_frames / max_plot_frames))
 
     print("Offline обработка запущена")
+    print(f"Папка теста: {run_ctx['run_dir']}")
     print(f"Файл: {source.path}")
     print(f"Формат: {cfg['format']}, sample_rate={format_hz(cfg['sample_rate'])}, center_freq={format_hz(cfg['center_freq'])}")
     print(f"FFT={cfg['fft_size']}, threshold={cfg['threshold_db']:.1f} dB, confirm_frames={cfg['confirm_frames']}")
@@ -324,9 +364,9 @@ def main() -> int:
     print("")
     print(f"Готово. Обработано кадров: {processed_frames}")
     print(f"Найдено подтверждённых событий: {len(events)}")
-    print(f"CSV журнал: {logger.csv_path}")
-    print(f"JSONL журнал: {logger.jsonl_path}")
-    print(f"XLSX журнал: {logger.xlsx_path}")
+    print(f"CSV отчёт: {logger.csv_path}")
+    print(f"JSONL отчёт: {logger.jsonl_path}")
+    print(f"XLSX отчёт: {logger.xlsx_path}")
     for saved_plot_path in saved_plot_paths:
         print(f"PNG спектрограмма: {saved_plot_path}")
     return 0
