@@ -1,0 +1,12 @@
+# Базовый конфиг для offline-проверки на синтетическом файле.
+# CLI-параметры имеют приоритет над значениями из этого файла.
+
+offline: data/test_bursty_cf32.iq
+format: complex64
+sample_rate: 2000000
+center_freq: 2440000000
+fft_size: 4096
+threshold_db: 12
+confirm_frames: 3
+max_seconds: 0.30
+plot: true
