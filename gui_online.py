@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -39,6 +40,9 @@ class OnlineWindow:
 
         self.frames_received = 0
         self.waterfall_data = np.full((300, 4096), -120.0, dtype=np.float32)
+        self.latest_psd: np.ndarray | None = None
+        self.last_draw_ts = 0.0
+        self.min_draw_interval_s = 0.12  # ~8 FPS, чтобы GUI не зависал
 
         self._build()
         self._poll()
@@ -174,19 +178,10 @@ class OnlineWindow:
                 if kind == "wf":
                     psd = np.asarray(payload, dtype=np.float32)
                     if psd.ndim == 1 and psd.size == self.waterfall_data.shape[1] and np.isfinite(psd).any():
-                        self.waterfall_data = np.roll(self.waterfall_data, -1, axis=0)
-                        self.waterfall_data[-1, :] = psd
-                        low = float(np.nanpercentile(self.waterfall_data, 5))
-                        high = float(np.nanpercentile(self.waterfall_data, 95))
-                        if not np.isfinite(low) or not np.isfinite(high) or high - low < 1.0:
-                            low, high = -100.0, -20.0
-                        self.img.set_data(self.waterfall_data)
-                        self.img.set_clim(low, high)
-                        self.canvas.draw_idle()
-                        self.frames_received += 1
-                        self.status.set(
-                            f"running | frames={self.frames_received} | psd min={np.min(psd):.1f} max={np.max(psd):.1f} | wf={self.waterfall_data.shape}"
-                        )
+                        self.latest_psd = psd
+                        now = time.perf_counter()
+                        if now - self.last_draw_ts >= self.min_draw_interval_s:
+                            self._redraw_latest_psd(now)
                 elif kind == "ev":
                     self.table.insert(
                         "",
@@ -204,4 +199,27 @@ class OnlineWindow:
                     messagebox.showerror("Online error", payload)
         except queue.Empty:
             pass
+        if self.latest_psd is not None:
+            now = time.perf_counter()
+            if now - self.last_draw_ts >= self.min_draw_interval_s:
+                self._redraw_latest_psd(now)
         self.top.after(100, self._poll)
+
+    def _redraw_latest_psd(self, now: float) -> None:
+        if self.latest_psd is None:
+            return
+        psd = self.latest_psd
+        self.waterfall_data = np.roll(self.waterfall_data, -1, axis=0)
+        self.waterfall_data[-1, :] = psd
+        low = float(np.nanpercentile(self.waterfall_data, 5))
+        high = float(np.nanpercentile(self.waterfall_data, 95))
+        if not np.isfinite(low) or not np.isfinite(high) or high - low < 1.0:
+            low, high = -100.0, -20.0
+        self.img.set_data(self.waterfall_data)
+        self.img.set_clim(low, high)
+        self.canvas.draw_idle()
+        self.frames_received += 1
+        self.last_draw_ts = now
+        self.status.set(
+            f"running | frames={self.frames_received} | psd min={np.min(psd):.1f} max={np.max(psd):.1f} | wf={self.waterfall_data.shape}"
+        )
