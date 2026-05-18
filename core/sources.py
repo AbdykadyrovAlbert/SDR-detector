@@ -120,7 +120,17 @@ class LiveSDRSource:
 class SyntheticSDRSource:
     """Синтетический live-источник complex64 для теста online-режима."""
 
-    def __init__(self, sample_rate_hz: float, center_freq_hz: float, block_size: int, burst_interval_sec: float = 1.0, burst_duration_sec: float = 0.2, signal_offset_hz: float = 120_000.0, snr_db: float = 18.0) -> None:
+    def __init__(
+        self,
+        sample_rate_hz: float,
+        center_freq_hz: float,
+        block_size: int,
+        burst_interval_sec: float = 1.0,
+        burst_duration_sec: float = 0.2,
+        signal_offset_hz: float = 120_000.0,
+        snr_db: float = 24.0,
+        modulation_width_hz: float = 6000.0,
+    ) -> None:
         self.sample_rate_hz = float(sample_rate_hz)
         self.center_freq_hz = float(center_freq_hz)
         self.block_size = int(block_size)
@@ -128,6 +138,7 @@ class SyntheticSDRSource:
         self.burst_duration_sec = float(burst_duration_sec)
         self.signal_offset_hz = float(signal_offset_hz)
         self.snr_db = float(snr_db)
+        self.modulation_width_hz = float(modulation_width_hz)
 
     def iter_blocks(self, max_seconds: Optional[float] = None) -> Iterator[IQBlock]:
         sample_idx = 0
@@ -141,7 +152,8 @@ class SyntheticSDRSource:
             noise = (rng.normal(0, 1, n) + 1j * rng.normal(0, 1, n)).astype(np.complex64)
             noise /= np.sqrt(2.0)
 
-            phase = 2 * np.pi * self.signal_offset_hz * t
+            fm = self.modulation_width_hz * np.sin(2 * np.pi * 5.0 * t)
+            phase = 2 * np.pi * (self.signal_offset_hz * t + 0.5 * fm * t / max(self.sample_rate_hz, 1.0))
             tone = np.exp(1j * phase).astype(np.complex64)
             burst_phase = np.mod(t, self.burst_interval_sec)
             burst_mask = burst_phase < self.burst_duration_sec

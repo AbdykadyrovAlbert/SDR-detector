@@ -23,7 +23,14 @@ class LiveRunner:
     def run(self, on_frame=None, on_event=None, stop_flag=None) -> Dict[str, object]:
         run_ctx = create_test_output_dirs(self.project_dir, root_name="outputs")
         processor = SpectrumProcessor(self.cfg["sample_rate_hz"], self.cfg["center_freq_hz"], self.cfg["fft_size"], self.cfg["threshold_db"])
-        detector = EventDetector(confirm_frames=int(self.cfg["confirm_frames"]), merge_gap_hz=processor.bin_width_hz * 2.0)
+        detector = EventDetector(
+            confirm_frames=int(self.cfg["confirm_frames"]),
+            merge_gap_hz=float(self.cfg.get("merge_events_freq_hz", processor.bin_width_hz * 2.0)),
+            min_event_duration_sec=float(self.cfg.get("min_event_duration_sec", 0.03)),
+            min_bandwidth_hz=float(self.cfg.get("min_bandwidth_hz", 5000.0)),
+            min_peak_over_noise_db=float(self.cfg.get("min_peak_over_noise_db", 8.0)),
+            min_bins_width=int(self.cfg.get("min_bins_width", 3)),
+        )
         pipeline = DetectionPipeline(processor, detector)
         logger = EventLogger(logs_dir=run_ctx["reports_dir"], prefix="online_sdr_events")
         frames: List[SpectrumFrame] = []
@@ -52,11 +59,31 @@ class LiveRunner:
         if tail:
             logger.write_events(tail)
             events.extend(tail)
-        logger.finalize()
         png_path = run_ctx["plots_dir"] / "online_sdr_spectrogram.png"
         save_spectrogram(frames, events, png_path, center_freq_hz=self.cfg["center_freq_hz"])
         stop = datetime.now()
         report_cfg = dict(self.cfg)
-        report_cfg.update({"start_time": start.isoformat(), "stop_time": stop.isoformat(), "processed_frames": processed, "events_count": len(events)})
+        average_event_duration = (sum(e.duration_s for e in events) / len(events)) if events else 0.0
+        average_bandwidth = (sum(e.bandwidth_hz for e in events) / len(events)) if events else 0.0
+        max_peak = max((e.peak_power_db for e in events), default=0.0)
+        centers = [e.center_freq_hz for e in events]
+        freq_range = f"{min(centers):.1f}..{max(centers):.1f}" if centers else ""
+        report_cfg.update(
+            {
+                "start_time": start.isoformat(),
+                "stop_time": stop.isoformat(),
+                "processed_frames": processed,
+                "total_raw_detections": detector.stats["raw_events"],
+                "confirmed_events_count": detector.stats["confirmed_events"],
+                "rejected_events_count": detector.stats["rejected_events"],
+                "events_count": len(events),
+                "average_event_duration": average_event_duration,
+                "average_bandwidth_hz": average_bandwidth,
+                "max_peak_power_db": max_peak,
+                "detected_frequency_range_hz": freq_range,
+            }
+        )
+        logger.report_info = report_cfg
+        logger.finalize()
         (run_ctx["reports_dir"] / "online_run_config.json").write_text(json.dumps(report_cfg, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"run_dir": run_ctx["run_dir"], "csv": logger.csv_path, "jsonl": logger.jsonl_path, "xlsx": logger.xlsx_path, "png": png_path, "events": len(events)}

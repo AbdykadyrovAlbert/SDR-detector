@@ -37,12 +37,19 @@ class OnlineWindow:
         self.conf = tk.StringVar(value="3")
         self.block = tk.StringVar(value="4096")
         self.rows = tk.StringVar(value="300")
+        self.min_event_duration = tk.StringVar(value="0.03")
+        self.min_bandwidth = tk.StringVar(value="5000")
+        self.min_peak_over_noise = tk.StringVar(value="8")
+        self.min_bins_width = tk.StringVar(value="3")
 
         self.frames_received = 0
         self.waterfall_data = np.full((300, 4096), -120.0, dtype=np.float32)
         self.latest_psd: np.ndarray | None = None
         self.last_draw_ts = 0.0
         self.min_draw_interval_s = 0.12  # ~8 FPS, чтобы GUI не зависал
+        self.events_count = 0
+        self.last_noise_floor_db = -120.0
+        self.last_threshold_db = -100.0
 
         self._build()
         self._poll()
@@ -63,6 +70,10 @@ class OnlineWindow:
             ("Confirm", self.conf),
             ("Block", self.block),
             ("Rows", self.rows),
+            ("Min dur, s", self.min_event_duration),
+            ("Min BW, Hz", self.min_bandwidth),
+            ("Min peak over noise", self.min_peak_over_noise),
+            ("Min bins", self.min_bins_width),
         ]
         for i, (label, var) in enumerate(items):
             ttk.Label(frm, text=label).grid(row=i // 4 * 2, column=i % 4, sticky="w")
@@ -95,8 +106,8 @@ class OnlineWindow:
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.top)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
 
-        self.table = ttk.Treeview(self.top, columns=("t", "freq", "peak"), show="headings", height=8)
-        for c in ("t", "freq", "peak"):
+        self.table = ttk.Treeview(self.top, columns=("n", "t", "dur", "freq", "bw", "peak", "status"), show="headings", height=8)
+        for c in ("n", "t", "dur", "freq", "bw", "peak", "status"):
             self.table.heading(c, text=c)
         self.table.pack(fill="x")
         ttk.Label(self.top, textvariable=self.status).pack(anchor="w", padx=8, pady=6)
@@ -117,6 +128,10 @@ class OnlineWindow:
             confirm_frames=int(self.conf.get()),
             block_size=int(self.block.get()),
             max_waterfall_rows=int(self.rows.get()),
+            min_event_duration_sec=float(self.min_event_duration.get()),
+            min_bandwidth_hz=float(self.min_bandwidth.get()),
+            min_peak_over_noise_db=float(self.min_peak_over_noise.get()),
+            min_bins_width=int(self.min_bins_width.get()),
             max_seconds=None,
         )
 
@@ -134,6 +149,7 @@ class OnlineWindow:
             return
         cfg = self._cfg()
         self.frames_received = 0
+        self.events_count = 0
         self.waterfall_data = np.full((cfg["max_waterfall_rows"], cfg["fft_size"]), -120.0, dtype=np.float32)
         self.stop_evt.clear()
         self.status.set("connecting")
@@ -157,7 +173,7 @@ class OnlineWindow:
             runner = LiveRunner(PROJECT_DIR, src, cfg)
 
             def on_frame(frame):
-                self.msg.put(("wf", frame.psd_db.copy()))
+                self.msg.put(("wf", (frame.psd_db.copy(), frame.noise_floor_db, frame.threshold_db)))
 
             def on_event(event):
                 self.msg.put(("ev", event))
@@ -176,22 +192,31 @@ class OnlineWindow:
             while True:
                 kind, payload = self.msg.get_nowait()
                 if kind == "wf":
-                    psd = np.asarray(payload, dtype=np.float32)
+                    psd_raw, noise_floor_db, threshold_db = payload
+                    psd = np.asarray(psd_raw, dtype=np.float32)
                     if psd.ndim == 1 and psd.size == self.waterfall_data.shape[1] and np.isfinite(psd).any():
                         self.latest_psd = psd
+                        self.last_noise_floor_db = float(noise_floor_db)
+                        self.last_threshold_db = float(threshold_db)
                         now = time.perf_counter()
                         if now - self.last_draw_ts >= self.min_draw_interval_s:
                             self._redraw_latest_psd(now)
                 elif kind == "ev":
+                    event_no = self.events_count + 1
                     self.table.insert(
                         "",
                         0,
                         values=(
+                            event_no,
                             f"{payload.start_time_s:.2f}-{payload.end_time_s:.2f}",
+                            f"{payload.duration_s:.3f}",
                             f"{payload.center_freq_hz:.0f}",
+                            f"{payload.bandwidth_hz:.0f}",
                             f"{payload.peak_power_db:.1f}",
+                            "confirmed",
                         ),
                     )
+                    self.events_count = event_no
                 elif kind == "done":
                     self.status.set(f"done: {payload['run_dir']}")
                 elif kind == "err":
@@ -221,5 +246,5 @@ class OnlineWindow:
         self.frames_received += 1
         self.last_draw_ts = now
         self.status.set(
-            f"running | frames={self.frames_received} | psd min={np.min(psd):.1f} max={np.max(psd):.1f} | wf={self.waterfall_data.shape}"
+            f"running | frames={self.frames_received} | events={self.events_count} | noise={self.last_noise_floor_db:.1f} dB | threshold={self.last_threshold_db:.1f} dB | psd max={np.max(psd):.1f} dB"
         )

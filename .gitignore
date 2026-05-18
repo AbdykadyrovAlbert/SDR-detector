@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.matplotlib/
+outputs/test_*/
+data/*.bin
+data/*.iq
+data/*.cf32
+*.log

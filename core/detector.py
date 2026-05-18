@@ -38,15 +38,36 @@ class EventDetector:
         self,
         confirm_frames: int = 3,
         merge_gap_hz: float | None = None,
+        min_event_duration_sec: float = 0.0,
+        min_bandwidth_hz: float = 0.0,
+        min_peak_over_noise_db: float = 0.0,
+        min_bins_width: int = 1,
     ) -> None:
         self.confirm_frames = max(1, int(confirm_frames))
         self.merge_gap_hz = merge_gap_hz
+        self.min_event_duration_sec = float(min_event_duration_sec)
+        self.min_bandwidth_hz = float(min_bandwidth_hz)
+        self.min_peak_over_noise_db = float(min_peak_over_noise_db)
+        self.min_bins_width = max(1, int(min_bins_width))
         self._tracks: List[_Track] = []
+        self.stats: Dict[str, int] = {"raw_regions": 0, "raw_events": 0, "confirmed_events": 0, "rejected_events": 0}
 
     def update(self, frame: SpectrumFrame) -> List[DetectedEvent]:
         """Обновляет активные треки и возвращает завершённые подтверждённые события."""
 
         candidates = self._merge_close_regions(frame.regions)
+        filtered_candidates = []
+        for region in candidates:
+            bins_width = region.end_bin - region.start_bin + 1
+            if bins_width < self.min_bins_width:
+                continue
+            if region.bandwidth_hz < self.min_bandwidth_hz:
+                continue
+            if (region.peak_power_db - frame.noise_floor_db) < self.min_peak_over_noise_db:
+                continue
+            filtered_candidates.append(region)
+        self.stats["raw_regions"] += len(candidates)
+        candidates = filtered_candidates
         for track in self._tracks:
             track.updated = False
 
@@ -85,7 +106,13 @@ class EventDetector:
             if track.updated:
                 still_active.append(track)
             elif track.confirmed:
-                finished.append(self._track_to_event(track))
+                self.stats["raw_events"] += 1
+                event = self._track_to_event(track)
+                if self._accept_event(event):
+                    finished.append(event)
+                    self.stats["confirmed_events"] += 1
+                else:
+                    self.stats["rejected_events"] += 1
 
         self._tracks = still_active
         return finished
@@ -93,9 +120,26 @@ class EventDetector:
     def flush(self) -> List[DetectedEvent]:
         """Завершает все подтверждённые события в конце файла."""
 
-        events = [self._track_to_event(track) for track in self._tracks if track.confirmed]
+        events: List[DetectedEvent] = []
+        for track in self._tracks:
+            if not track.confirmed:
+                continue
+            self.stats["raw_events"] += 1
+            event = self._track_to_event(track)
+            if self._accept_event(event):
+                events.append(event)
+                self.stats["confirmed_events"] += 1
+            else:
+                self.stats["rejected_events"] += 1
         self._tracks.clear()
         return events
+
+    def _accept_event(self, event: DetectedEvent) -> bool:
+        if event.duration_s < self.min_event_duration_sec:
+            return False
+        if event.bandwidth_hz <= 0 or event.bandwidth_hz < self.min_bandwidth_hz:
+            return False
+        return True
 
     def _merge_close_regions(self, regions: List[SpectrumRegion]) -> List[SpectrumRegion]:
         if not regions:
