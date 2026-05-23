@@ -100,82 +100,142 @@ class OnlineWindow:
         return ent
 
     def _build(self) -> None:
-        root = ttk.Frame(self.top)
-        root.pack(fill="both", expand=True, padx=8, pady=8)
+        self.top.minsize(1000, 700)
+
+        main_container = ttk.Frame(self.top)
+        main_container.pack(fill="both", expand=True)
+
+        self.scroll_canvas = tk.Canvas(main_container, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=self.scroll_canvas.yview)
+        self.scroll_canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.pack(side="right", fill="y")
+        self.scroll_canvas.pack(side="left", fill="both", expand=True)
+
+        self.scrollable_frame = ttk.Frame(self.scroll_canvas)
+        self.canvas_window_id = self.scroll_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+
+        self.scrollable_frame.bind("<Configure>", self._on_frame_configure)
+        self.scroll_canvas.bind("<Configure>", self._on_canvas_configure)
+        self.scroll_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+        root = ttk.Frame(self.scrollable_frame, padding=8)
+        root.pack(fill="both", expand=True)
 
         cfg = ttk.Frame(root)
         cfg.pack(fill="x")
 
-        src_box = ttk.LabelFrame(cfg, text="1) Источник сигнала")
-        sdr_box = ttk.LabelFrame(cfg, text="2) Параметры SDR")
-        ana_box = ttk.LabelFrame(cfg, text="3) Параметры анализа")
-        det_box = ttk.LabelFrame(cfg, text="4) Детекция")
-        ctl_box = ttk.LabelFrame(cfg, text="5) Управление")
-        for b in (src_box, sdr_box, ana_box, det_box, ctl_box):
-            b.pack(fill="x", pady=4)
+        src_box = ttk.LabelFrame(cfg, text="Источник сигнала", padding=4)
+        sdr_box = ttk.LabelFrame(cfg, text="Параметры SDR", padding=4)
+        ana_box = ttk.LabelFrame(cfg, text="Параметры анализа", padding=4)
+        det_box = ttk.LabelFrame(cfg, text="Детекция", padding=4)
+        ctl_box = ttk.LabelFrame(cfg, text="Управление", padding=4)
+        adv_box = ttk.LabelFrame(cfg, text="Расширенные параметры", padding=4)
 
-        for i in range(4):
-            sdr_box.columnconfigure(i, weight=1)
-            ana_box.columnconfigure(i, weight=1)
-            det_box.columnconfigure(i, weight=1)
+        src_box.pack(fill="x", pady=2)
+        sdr_box.pack(fill="x", pady=2)
+        ana_box.pack(fill="x", pady=2)
+        det_box.pack(fill="x", pady=2)
+        ctl_box.pack(fill="x", pady=2)
+        adv_box.pack(fill="x", pady=2)
 
-        ttk.Label(src_box, text="Пресет").grid(row=0, column=0, sticky="w", padx=5, pady=(4, 0))
+        self.advanced_visible = True
+
+        ttk.Button(ctl_box, text="Скрыть расширенные параметры", command=self._toggle_advanced).pack(side="left", padx=4, pady=2)
+        ttk.Button(ctl_box, text="Найти SDR", command=self._find).pack(side="left", padx=4, pady=2)
+        ttk.Button(ctl_box, text="Старт", command=self._start).pack(side="left", padx=4, pady=2)
+        ttk.Button(ctl_box, text="Стоп", command=self._stop).pack(side="left", padx=4, pady=2)
+        ttk.Button(ctl_box, text="Справка", command=self._show_help).pack(side="left", padx=4, pady=2)
+
+        src_box.columnconfigure(0, weight=1)
+        src_box.columnconfigure(1, weight=1)
+        src_box.columnconfigure(2, weight=2)
+        ttk.Label(src_box, text="Пресет").grid(row=0, column=0, sticky="w", padx=4, pady=(2, 0))
         preset = ttk.Combobox(src_box, textvariable=self.preset_var, values=list(self.PRESETS), state="readonly")
-        preset.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 4))
+        preset.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 2))
         preset.bind("<<ComboboxSelected>>", self._apply_preset)
         ToolTip(preset, "Быстрые частотные пресеты для первого запуска.")
 
-        ttk.Label(src_box, text="Источник").grid(row=0, column=1, sticky="w", padx=5, pady=(4, 0))
+        ttk.Label(src_box, text="Источник").grid(row=0, column=1, sticky="w", padx=4, pady=(2, 0))
         src_combo = ttk.Combobox(src_box, textvariable=self.source_var, values=["synthetic", "soapy"], state="readonly")
-        src_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=(0, 4))
+        src_combo.grid(row=1, column=1, sticky="ew", padx=4, pady=(0, 2))
         ToolTip(src_combo, "synthetic — тестовый сигнал без SDR. soapy — реальный SDR через SoapySDR.")
 
         self._labeled_entry(src_box, 0, 2, "Аргументы устройства", self.device_args, "Для SDRplay RSP1: driver=sdrplay. Для HackRF: driver=hackrf. Для RTL-SDR: driver=rtlsdr.")
-        src_box.columnconfigure(2, weight=1)
+
+        for i in range(5):
+            sdr_box.columnconfigure(i, weight=1)
+            ana_box.columnconfigure(i, weight=1)
+            det_box.columnconfigure(i, weight=1)
+            adv_box.columnconfigure(i, weight=1)
 
         self._labeled_entry(sdr_box, 0, 0, "Частота дискретизации, Гц", self.sr, "Рекомендуемый старт: 2000000.")
         self._labeled_entry(sdr_box, 0, 1, "Центральная частота, Гц", self.cf, "Например 100000000 = 100 МГц, 433920000 = 433.92 МГц.")
         self._labeled_entry(sdr_box, 0, 2, "Полоса приёма, Гц", self.bw, "Обычно не больше sample rate. Старт: 1536000.")
         self._labeled_entry(sdr_box, 0, 3, "Усиление, дБ", self.gain, "Если AGC включен, ручное усиление может игнорироваться.")
-        agc = ttk.Checkbutton(sdr_box, text="AGC (автоусиление)", variable=self.agc)
-        agc.grid(row=2, column=0, sticky="w", padx=5, pady=4)
+        agc = ttk.Checkbutton(sdr_box, text="AGC", variable=self.agc)
+        agc.grid(row=1, column=4, sticky="w", padx=4, pady=(0, 2))
         ToolTip(agc, "Автоматическая регулировка усиления.")
 
-        self._labeled_entry(ana_box, 0, 0, "Размер FFT", self.fft, "Больше FFT — выше разрешение, но выше нагрузка. Рекомендуется 4096.")
-        self._labeled_entry(ana_box, 0, 1, "Порог детекции, дБ", self.th, "Увеличьте, если слишком много ложных срабатываний.")
-        self._labeled_entry(ana_box, 0, 2, "Кадров подтверждения", self.conf, "Сколько кадров подряд нужно для подтверждения события.")
-        self._labeled_entry(ana_box, 0, 3, "Размер блока", self.block, "Сколько I/Q отсчётов читается за раз. Старт: 4096.")
-        self._labeled_entry(ana_box, 2, 0, "Строк спектрограммы", self.rows, "Длина истории на экране. Больше — больше нагрузка.")
+        self._labeled_entry(ana_box, 0, 0, "Размер FFT", self.fft, "Больше FFT — выше разрешение, но выше нагрузка.")
+        self._labeled_entry(ana_box, 0, 1, "Порог детекции, дБ", self.th, "Увеличьте, если ложных срабатываний много.")
+        self._labeled_entry(ana_box, 0, 2, "Кадров подтверждения", self.conf, "Кадры подряд для подтверждения события.")
+        self._labeled_entry(ana_box, 0, 3, "Размер блока", self.block, "Рекомендуется 4096 или 16384.")
+        self._labeled_entry(ana_box, 0, 4, "Строк спектрограммы", self.rows, "Сколько кадров истории показывать.")
 
-        self._labeled_entry(det_box, 0, 0, "Мин. длительность, с", self.min_event_duration, "События короче этого значения не сохраняются.")
+        self._labeled_entry(det_box, 0, 0, "Мин. длительность, с", self.min_event_duration, "События короче не сохраняются.")
         self._labeled_entry(det_box, 0, 1, "Мин. полоса, Гц", self.min_bandwidth, "Отсекает узкие шумовые пики.")
-        self._labeled_entry(det_box, 0, 2, "Мин. пик над шумом, дБ", self.min_peak_over_noise, "Минимальное превышение над шумовым фоном.")
+        self._labeled_entry(det_box, 0, 2, "Мин. пик над шумом, дБ", self.min_peak_over_noise, "Минимальный уровень над шумом.")
         self._labeled_entry(det_box, 0, 3, "Минимум FFT-бинов", self.min_bins_width, "Минимум соседних бинов выше порога.")
 
-        ttk.Button(ctl_box, text="Найти SDR", command=self._find).pack(side="left", padx=5, pady=5)
-        ttk.Button(ctl_box, text="Старт", command=self._start).pack(side="left", padx=5, pady=5)
-        ttk.Button(ctl_box, text="Стоп", command=self._stop).pack(side="left", padx=5, pady=5)
-        ttk.Button(ctl_box, text="Справка", command=self._show_help).pack(side="left", padx=5, pady=5)
+        ttk.Label(adv_box, text="Wi‑Fi/Bluetooth ~2.4 ГГц и выше. SDRplay RSP1 принимает до 2 ГГц.", foreground="#666666").grid(row=0, column=0, columnspan=5, sticky="w", padx=4, pady=2)
+        self.advanced_box = adv_box
 
-        self.fig = Figure(figsize=(9, 4.8))
+        status_frame = ttk.Frame(root)
+        status_frame.pack(fill="x", pady=(2, 4))
+        ttk.Label(status_frame, textvariable=self.status).pack(anchor="w")
+
+        plot_frame = ttk.Frame(root)
+        plot_frame.pack(fill="both", expand=True)
+        self.fig = Figure(figsize=(10.5, 4.0))
         self.ax = self.fig.add_subplot(111)
         self.img = self.ax.imshow(self.waterfall_data, aspect="auto", origin="lower", cmap="viridis", vmin=-100, vmax=-20, interpolation="nearest")
         self.ax.set_title("Спектрограмма в реальном времени (PSD, дБ)")
         self.ax.set_xlabel("Частота, МГц")
         self.ax.set_ylabel("Кадр")
-        self.canvas = FigureCanvasTkAgg(self.fig, master=root)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=plot_frame)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
 
-        self.table = ttk.Treeview(root, columns=("n", "t", "dur", "freq", "bw", "peak", "status"), show="headings", height=8)
+        table_wrap = ttk.Frame(root)
+        table_wrap.pack(fill="both", expand=False, pady=(6, 0))
+        self.table = ttk.Treeview(table_wrap, columns=("n", "t", "dur", "freq", "bw", "peak", "status"), show="headings", height=8)
         headers = {"n": "№", "t": "Время, с", "dur": "Длительность, с", "freq": "Частота, Гц", "bw": "Полоса, Гц", "peak": "Пик, дБ", "status": "Статус"}
+        widths = {"n": 50, "t": 170, "dur": 120, "freq": 150, "bw": 130, "peak": 110, "status": 140}
         for c in headers:
             self.table.heading(c, text=headers[c])
-        self.table.pack(fill="x", pady=(6, 0))
-
-        ttk.Label(root, text="Wi‑Fi/Bluetooth работают около 2.4 ГГц и выше. SDRplay RSP1 принимает до 2 ГГц.", foreground="#666666").pack(anchor="w")
-        ttk.Label(root, textvariable=self.status).pack(anchor="w", pady=4)
+            self.table.column(c, width=widths[c], anchor="center")
+        yscroll = ttk.Scrollbar(table_wrap, orient="vertical", command=self.table.yview)
+        self.table.configure(yscrollcommand=yscroll.set)
+        self.table.pack(side="left", fill="both", expand=True)
+        yscroll.pack(side="right", fill="y")
 
         self._apply_preset()
+
+    def _on_frame_configure(self, _event=None) -> None:
+        self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event) -> None:
+        self.scroll_canvas.itemconfigure(self.canvas_window_id, width=event.width)
+
+    def _on_mousewheel(self, event) -> None:
+        self.scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _toggle_advanced(self) -> None:
+        if self.advanced_visible:
+            self.advanced_box.pack_forget()
+            self.advanced_visible = False
+        else:
+            self.advanced_box.pack(fill="x", pady=2)
+            self.advanced_visible = True
 
     def _show_help(self) -> None:
         text = (
