@@ -1,40 +1,39 @@
 # SDR UAV Detector
 
-## Offline mode
-Существующий offline режим: обработка I/Q файла, детекция, PNG спектрограмма, CSV/JSONL/XLSX отчет.
+## Offline режим
+```bash
+python scripts/generate_test_iq.py
+python scripts/run_offline.py
+```
 
-## Online synthetic mode
-Запуск без SDR:
+## Online synthetic режим (без SDR)
 ```bash
 python scripts/run_online_synthetic.py
 ```
-Источник `SyntheticSDRSource` генерирует шум + burst сигналы и проверяет online pipeline.
 
-## Online SDR mode
-В GUI добавлена кнопка **Открыть online-режим SDR**.
-Доступны источники:
-- `synthetic`
-- `soapy` (реальный SDR через SoapySDR)
+## Online SDR режим (GUI)
+```bash
+python gui.py
+```
+В главном окне нажмите **Открыть online-режим SDR**.
 
-Если SoapySDR не установлен, offline и synthetic продолжают работать, а soapy режим покажет понятную ошибку.
+## Запуск online-режима с SDRplay RSP1 на Windows
+```powershell
+cd "ПУТЬ_К_ПРОЕКТУ"
+$env:PATH="D:\PothosSDR\bin;$env:PATH"
+$env:PYTHONPATH="D:\PothosSDR\lib\python3.9\site-packages;$env:PYTHONPATH"
+python -c "import SoapySDR; print(SoapySDR)"
+SoapySDRUtil.exe --find="driver=sdrplay"
+python scripts/check_sdr.py
+python gui.py
+```
 
-## SDR device args examples
-- `driver=sdrplay`
-- `driver=rtlsdr`
-- `driver=hackrf`
-- `driver=lime`
+Требуется:
+- SDRplay API 3.15
+- PothosSDR
+- SoapySDRPlay/SoapySDRPlay3 plugin
+- Python должен видеть модуль SoapySDR
 
-## Output structure
-Все запуски сохраняются в:
+## Структура результатов
 - `outputs/test_XXX/plots`
 - `outputs/test_XXX/reports`
-
-Online synthetic/SDR формирует:
-- `online_sdr_spectrogram.png`
-- `online_sdr_events*.csv/jsonl/xlsx`
-- `online_run_config.json`
-
-## Windows 10 notes
-См.:
-- `docs/WINDOWS_SETUP.md`
-- `docs/SDR_ONLINE_SETUP.md`

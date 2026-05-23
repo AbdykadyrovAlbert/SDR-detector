@@ -1,11 +1,20 @@
-# Windows 10 Setup
+# Windows 10/11 + SDRplay RSP1
 
-- Offline и synthetic online работают без SoapySDR.
-- Для SDRplay RSP1 нужны: SDRplay API, SoapySDR, SoapySDRPlay3, python bindings SoapySDR.
+Необходимые компоненты:
+- SDRplay API 3.15
+- PothosSDR
+- SoapySDRPlay3
+- Python + зависимости проекта
 
-Проверка:
-- `SoapySDRUtil.exe --info`
-- `SoapySDRUtil.exe --find`
-- `SoapySDRUtil.exe --find="driver=sdrplay"`
-- `SoapySDRUtil.exe --probe="driver=sdrplay"`
-- `python -c "import SoapySDR; print(SoapySDR)"`
+Команды проверки:
+```powershell
+$env:PATH="D:\PothosSDR\bin;$env:PATH"
+$env:PYTHONPATH="D:\PothosSDR\lib\python3.9\site-packages;$env:PYTHONPATH"
+SoapySDRUtil.exe --info
+SoapySDRUtil.exe --find
+SoapySDRUtil.exe --find="driver=sdrplay"
+python -c "import SoapySDR; print(SoapySDR)"
+python scripts/check_sdr.py
+```
+
+Synthetic режим работает без SoapySDR.

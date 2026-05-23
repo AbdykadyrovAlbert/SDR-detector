@@ -1,19 +1,19 @@
-# SDR Online Setup
+# Онлайн-режим SDR
 
-Online режим поддерживает источники `synthetic` и `soapy`.
+Online окно полностью русифицировано и содержит подсказки для полей.
 
-Рекомендуемые параметры:
-- sample_rate_hz = 2000000
-- center_freq_hz = 433920000
-- bandwidth_hz = 1536000
-- fft_size = 4096
-- threshold_db = 12
-- confirm_frames = 3
+## Быстрый тест без SDR
+```bash
+python scripts/run_online_synthetic.py
+```
 
-Примеры `device_args`:
-- `driver=sdrplay`
-- `driver=rtlsdr`
-- `driver=hackrf`
-- `driver=lime`
+## Проверка реального SDR через SoapySDR
+```powershell
+SoapySDRUtil.exe --find="driver=sdrplay"
+python -c "import SoapySDR; print(SoapySDR)"
+python scripts/check_sdr.py
+```
 
-Для SDRplay RSP1: `driver=sdrplay`.
+## Рекомендации
+- Для первого запуска: sample_rate=2000000, center_freq=100000000 или 433920000.
+- Если ложных срабатываний много — увеличьте порог и/или min bins.
