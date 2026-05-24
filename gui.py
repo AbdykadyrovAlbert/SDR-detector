@@ -424,7 +424,12 @@ class DetectorApp:
 
 def create_root() -> tk.Tk:
     if DND_AVAILABLE:
-        return TkinterDnD.Tk()
+        try:
+            return TkinterDnD.Tk()
+        except Exception:
+            # Если tkinterdnd2 установлен, но нативный tkdnd недоступен,
+            # запускаем обычный Tk без drag-and-drop, чтобы GUI не закрывался.
+            return tk.Tk()
     return tk.Tk()
 
 
