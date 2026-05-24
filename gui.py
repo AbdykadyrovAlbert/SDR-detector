@@ -49,6 +49,30 @@ PRESETS = {
 }
 
 
+class ToolTip:
+    def __init__(self, widget, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        widget.bind("<Enter>", self.show)
+        widget.bind("<Leave>", self.hide)
+
+    def show(self, _event=None) -> None:
+        if self.tip_window is not None:
+            return
+        x = self.widget.winfo_rootx() + 16
+        y = self.widget.winfo_rooty() + 16
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        tk.Label(tw, text=self.text, justify="left", background="#ffffe0", relief="solid", borderwidth=1, wraplength=360).pack(ipadx=5, ipady=3)
+
+    def hide(self, _event=None) -> None:
+        if self.tip_window is not None:
+            self.tip_window.destroy()
+            self.tip_window = None
+
+
 class DetectorApp:
     def __init__(self, root: tk.Tk) -> None:
         self.online_window = None
@@ -441,26 +465,17 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
-class ToolTip:
-    def __init__(self, widget, text: str) -> None:
-        self.widget = widget
-        self.text = text
-        self.tip_window = None
-        widget.bind("<Enter>", self.show)
-        widget.bind("<Leave>", self.hide)
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        import traceback
 
-    def show(self, _event=None) -> None:
-        if self.tip_window is not None:
-            return
-        x = self.widget.winfo_rootx() + 16
-        y = self.widget.winfo_rooty() + 16
-        self.tip_window = tw = tk.Toplevel(self.widget)
-        tw.wm_overrideredirect(True)
-        tw.wm_geometry(f"+{x}+{y}")
-        tk.Label(tw, text=self.text, justify="left", background="#ffffe0", relief="solid", borderwidth=1, wraplength=360).pack(ipadx=5, ipady=3)
-
-    def hide(self, _event=None) -> None:
-        if self.tip_window is not None:
-            self.tip_window.destroy()
-            self.tip_window = None
+        traceback.print_exc()
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Ошибка запуска GUI", f"{exc}\n\nПодробности см. в консоли.")
+            root.destroy()
+        except Exception:
+            pass
+        raise
