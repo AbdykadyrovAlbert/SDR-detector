@@ -180,7 +180,7 @@ class OnlineWindow:
         self.table.pack(side="left", fill="both", expand=True)
         t_scroll.pack(side="right", fill="y")
 
-        self._apply_preset()
+        # Пресеты удалены из интерфейса, стартовые значения уже заданы в StringVar.
 
     def _on_frame_configure(self, _event=None) -> None:
         self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
