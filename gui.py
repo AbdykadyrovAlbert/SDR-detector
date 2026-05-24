@@ -53,7 +53,7 @@ class DetectorApp:
     def __init__(self, root: tk.Tk) -> None:
         self.online_window = None
         self.root = root
-        self.root.title("SDR UAV Detector")
+        self.root.title("Детектор сигналов БПЛА SDR")
         self.root.geometry("980x720")
         self.root.minsize(860, 620)
 
@@ -72,8 +72,17 @@ class DetectorApp:
         self.plot_var = tk.BooleanVar(value=True)
         self.preset_var = tk.StringVar(value="Тест complex64")
 
+        self._setup_styles()
         self._build_ui()
         self._poll_messages()
+
+    def _setup_styles(self) -> None:
+        style = ttk.Style(self.root)
+        style.configure("TLabel", font=("Segoe UI", 11))
+        style.configure("TButton", font=("Segoe UI", 11))
+        style.configure("TEntry", font=("Segoe UI", 11))
+        style.configure("TCombobox", font=("Segoe UI", 11))
+        style.configure("TLabelframe.Label", font=("Segoe UI", 11, "bold"))
 
     def _build_ui(self) -> None:
         self.root.columnconfigure(0, weight=1)
@@ -133,28 +142,30 @@ class DetectorApp:
             state="readonly",
         ).grid(row=1, column=1, sticky="ew", padx=10, pady=(0, 10))
 
-        self._add_entry(settings, "Sample rate, Hz", self.sample_rate_var, row=0, column=2)
-        self._add_entry(settings, "Center freq, Hz", self.center_freq_var, row=0, column=3)
-        self._add_entry(settings, "FFT", self.fft_size_var, row=0, column=4)
-        self._add_entry(settings, "Max seconds", self.max_seconds_var, row=0, column=5)
+        self._add_entry(settings, "Частота дискретизации, Гц", self.sample_rate_var, row=0, column=2)
+        self._add_entry(settings, "Центральная частота, Гц", self.center_freq_var, row=0, column=3)
+        self._add_entry(settings, "Размер FFT", self.fft_size_var, row=0, column=4)
+        self._add_entry(settings, "Макс. длительность, с", self.max_seconds_var, row=0, column=5)
 
-        self._add_entry(settings, "Threshold, dB", self.threshold_var, row=2, column=0)
-        self._add_entry(settings, "Confirm frames", self.confirm_var, row=2, column=1)
+        self._add_entry(settings, "Порог детекции, дБ", self.threshold_var, row=2, column=0)
+        self._add_entry(settings, "Кадров подтверждения", self.confirm_var, row=2, column=1)
 
         ttk.Checkbutton(settings, text="Сохранять PNG-спектрограмму", variable=self.plot_var).grid(
             row=3, column=2, columnspan=2, sticky="w", padx=10, pady=(0, 12)
         )
 
-        ttk.Button(settings, text="Открыть reports", command=lambda: self._open_folder(PROJECT_DIR / "outputs", "reports")).grid(
+        ttk.Button(settings, text="Открыть отчёты", command=lambda: self._open_folder(PROJECT_DIR / "outputs", "reports")).grid(
             row=3, column=4, sticky="ew", padx=10, pady=(0, 12)
         )
-        ttk.Button(settings, text="Открыть plots", command=lambda: self._open_folder(PROJECT_DIR / "outputs", "plots")).grid(
+        ttk.Button(settings, text="Открыть спектрограммы", command=lambda: self._open_folder(PROJECT_DIR / "outputs", "plots")).grid(
             row=3, column=5, sticky="ew", padx=10, pady=(0, 12)
         )
 
         self.start_button = ttk.Button(settings, text="Запустить обработку", command=self._start_processing)
         self.start_button.grid(row=4, column=4, sticky="ew", padx=10, pady=(0, 12))
-        ttk.Button(settings, text="Открыть online-режим SDR", command=self._open_online).grid(row=4, column=5, sticky="ew", padx=10, pady=(0, 12))
+        online_btn = ttk.Button(settings, text="Открыть онлайн-режим SDR", command=self._open_online)
+        online_btn.grid(row=4, column=5, sticky="ew", padx=10, pady=(0, 12))
+        ToolTip(online_btn, "Открывает окно live-режима для synthetic или реального SDR через SoapySDR.")
 
         log_frame = ttk.LabelFrame(self.root, text="Журнал выполнения")
         log_frame.grid(row=3, column=0, sticky="nsew", padx=16, pady=(8, 16))
@@ -426,3 +437,25 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+class ToolTip:
+    def __init__(self, widget, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        widget.bind("<Enter>", self.show)
+        widget.bind("<Leave>", self.hide)
+
+    def show(self, _event=None) -> None:
+        if self.tip_window is not None:
+            return
+        x = self.widget.winfo_rootx() + 16
+        y = self.widget.winfo_rooty() + 16
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        tk.Label(tw, text=self.text, justify="left", background="#ffffe0", relief="solid", borderwidth=1, wraplength=360).pack(ipadx=5, ipady=3)
+
+    def hide(self, _event=None) -> None:
+        if self.tip_window is not None:
+            self.tip_window.destroy()
+            self.tip_window = None
