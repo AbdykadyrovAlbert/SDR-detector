@@ -26,12 +26,12 @@ class ToolTip:
     def show(self, _event=None) -> None:
         if self.tip_window is not None:
             return
-        x = self.widget.winfo_rootx() + 20
-        y = self.widget.winfo_rooty() + 20
+        x = self.widget.winfo_rootx() + 18
+        y = self.widget.winfo_rooty() + 18
         self.tip_window = tw = tk.Toplevel(self.widget)
         tw.wm_overrideredirect(True)
         tw.wm_geometry(f"+{x}+{y}")
-        label = tk.Label(tw, text=self.text, justify="left", background="#ffffe0", relief="solid", borderwidth=1, wraplength=420)
+        label = tk.Label(tw, text=self.text, justify="left", background="#ffffe0", relief="solid", borderwidth=1, wraplength=380)
         label.pack(ipadx=5, ipady=3)
 
     def hide(self, _event=None) -> None:
@@ -53,7 +53,9 @@ class OnlineWindow:
     def __init__(self, master: tk.Tk) -> None:
         self.top = tk.Toplevel(master)
         self.top.title("Онлайн SDR")
-        self.top.geometry("1320x840")
+        self.top.geometry("1200x800")
+        self.top.minsize(1000, 700)
+
         self.msg: queue.Queue = queue.Queue()
         self.stop_evt = threading.Event()
         self.worker = None
@@ -85,34 +87,34 @@ class OnlineWindow:
         self.latest_psd: np.ndarray | None = None
         self.last_draw_ts = 0.0
         self.min_draw_interval_s = 0.12
-        self.device_text = "не определено"
+        self.device_text = "—"
+        self.last_event_text = "—"
+        self.advanced_visible = False
 
         self._build()
         self._poll()
 
-    def _labeled_entry(self, parent, row, col, label, var, tip):
+    def _labeled_entry(self, parent, row: int, col: int, label: str, var, tip: str):
         lbl = ttk.Label(parent, text=label)
-        lbl.grid(row=row, column=col, sticky="w", padx=5, pady=(4, 0))
-        ent = ttk.Entry(parent, textvariable=var)
-        ent.grid(row=row + 1, column=col, sticky="ew", padx=5, pady=(0, 4))
+        lbl.grid(row=row, column=col, sticky="w", padx=4, pady=(2, 0))
+        ent = ttk.Entry(parent, textvariable=var, width=13)
+        ent.grid(row=row + 1, column=col, sticky="ew", padx=4, pady=(0, 2))
         ToolTip(lbl, tip)
         ToolTip(ent, tip)
         return ent
 
     def _build(self) -> None:
-        self.top.minsize(1000, 700)
-
         main_container = ttk.Frame(self.top)
         main_container.pack(fill="both", expand=True)
 
         self.scroll_canvas = tk.Canvas(main_container, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=self.scroll_canvas.yview)
-        self.scroll_canvas.configure(yscrollcommand=self.scrollbar.set)
-        self.scrollbar.pack(side="right", fill="y")
+        self.v_scroll = ttk.Scrollbar(main_container, orient="vertical", command=self.scroll_canvas.yview)
+        self.scroll_canvas.configure(yscrollcommand=self.v_scroll.set)
+        self.v_scroll.pack(side="right", fill="y")
         self.scroll_canvas.pack(side="left", fill="both", expand=True)
 
         self.scrollable_frame = ttk.Frame(self.scroll_canvas)
-        self.canvas_window_id = self.scroll_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas_window = self.scroll_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
 
         self.scrollable_frame.bind("<Configure>", self._on_frame_configure)
         self.scroll_canvas.bind("<Configure>", self._on_canvas_configure)
@@ -121,131 +123,107 @@ class OnlineWindow:
         root = ttk.Frame(self.scrollable_frame, padding=8)
         root.pack(fill="both", expand=True)
 
-        cfg = ttk.Frame(root)
-        cfg.pack(fill="x")
+        settings_box = ttk.LabelFrame(root, text="Настройки", padding=6)
+        settings_box.pack(fill="x", pady=(0, 4))
+        for c in range(11):
+            settings_box.columnconfigure(c, weight=1)
 
-        src_box = ttk.LabelFrame(cfg, text="Источник сигнала", padding=4)
-        sdr_box = ttk.LabelFrame(cfg, text="Параметры SDR", padding=4)
-        ana_box = ttk.LabelFrame(cfg, text="Параметры анализа", padding=4)
-        det_box = ttk.LabelFrame(cfg, text="Детекция", padding=4)
-        ctl_box = ttk.LabelFrame(cfg, text="Управление", padding=4)
-        adv_box = ttk.LabelFrame(cfg, text="Расширенные параметры", padding=4)
-
-        src_box.pack(fill="x", pady=2)
-        sdr_box.pack(fill="x", pady=2)
-        ana_box.pack(fill="x", pady=2)
-        det_box.pack(fill="x", pady=2)
-        ctl_box.pack(fill="x", pady=2)
-        adv_box.pack(fill="x", pady=2)
-
-        self.advanced_visible = True
-
-        ttk.Button(ctl_box, text="Скрыть расширенные параметры", command=self._toggle_advanced).pack(side="left", padx=4, pady=2)
-        ttk.Button(ctl_box, text="Найти SDR", command=self._find).pack(side="left", padx=4, pady=2)
-        ttk.Button(ctl_box, text="Старт", command=self._start).pack(side="left", padx=4, pady=2)
-        ttk.Button(ctl_box, text="Стоп", command=self._stop).pack(side="left", padx=4, pady=2)
-        ttk.Button(ctl_box, text="Справка", command=self._show_help).pack(side="left", padx=4, pady=2)
-
-        src_box.columnconfigure(0, weight=1)
-        src_box.columnconfigure(1, weight=1)
-        src_box.columnconfigure(2, weight=2)
-        ttk.Label(src_box, text="Пресет").grid(row=0, column=0, sticky="w", padx=4, pady=(2, 0))
-        preset = ttk.Combobox(src_box, textvariable=self.preset_var, values=list(self.PRESETS), state="readonly")
+        ttk.Label(settings_box, text="Пресет").grid(row=0, column=0, sticky="w", padx=4, pady=(2, 0))
+        preset = ttk.Combobox(settings_box, textvariable=self.preset_var, values=list(self.PRESETS), state="readonly", width=18)
         preset.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 2))
         preset.bind("<<ComboboxSelected>>", self._apply_preset)
-        ToolTip(preset, "Быстрые частотные пресеты для первого запуска.")
+        ToolTip(preset, "Быстрые частотные пресеты.")
 
-        ttk.Label(src_box, text="Источник").grid(row=0, column=1, sticky="w", padx=4, pady=(2, 0))
-        src_combo = ttk.Combobox(src_box, textvariable=self.source_var, values=["synthetic", "soapy"], state="readonly")
+        ttk.Label(settings_box, text="Источник").grid(row=0, column=1, sticky="w", padx=4, pady=(2, 0))
+        src_combo = ttk.Combobox(settings_box, textvariable=self.source_var, values=["synthetic", "soapy"], state="readonly", width=12)
         src_combo.grid(row=1, column=1, sticky="ew", padx=4, pady=(0, 2))
-        ToolTip(src_combo, "synthetic — тестовый сигнал без SDR. soapy — реальный SDR через SoapySDR.")
+        ToolTip(src_combo, "synthetic — тестовый сигнал без SDR; soapy — реальный SDR через SoapySDR.")
 
-        self._labeled_entry(src_box, 0, 2, "Аргументы устройства", self.device_args, "Для SDRplay RSP1: driver=sdrplay. Для HackRF: driver=hackrf. Для RTL-SDR: driver=rtlsdr.")
+        self._labeled_entry(settings_box, 0, 2, "Аргументы устройства", self.device_args, "Для SDRplay RSP1: driver=sdrplay.")
+        ttk.Button(settings_box, text="Найти SDR", command=self._find).grid(row=1, column=3, sticky="ew", padx=4, pady=(0, 2))
 
-        for i in range(5):
-            sdr_box.columnconfigure(i, weight=1)
-            ana_box.columnconfigure(i, weight=1)
-            det_box.columnconfigure(i, weight=1)
-            adv_box.columnconfigure(i, weight=1)
-
-        self._labeled_entry(sdr_box, 0, 0, "Частота дискретизации, Гц", self.sr, "Рекомендуемый старт: 2000000.")
-        self._labeled_entry(sdr_box, 0, 1, "Центральная частота, Гц", self.cf, "Например 100000000 = 100 МГц, 433920000 = 433.92 МГц.")
-        self._labeled_entry(sdr_box, 0, 2, "Полоса приёма, Гц", self.bw, "Обычно не больше sample rate. Старт: 1536000.")
-        self._labeled_entry(sdr_box, 0, 3, "Усиление, дБ", self.gain, "Если AGC включен, ручное усиление может игнорироваться.")
-        agc = ttk.Checkbutton(sdr_box, text="AGC", variable=self.agc)
-        agc.grid(row=1, column=4, sticky="w", padx=4, pady=(0, 2))
+        self._labeled_entry(settings_box, 2, 0, "Частота дискретизации, Гц", self.sr, "Рекомендуемый старт: 2000000.")
+        self._labeled_entry(settings_box, 2, 1, "Центральная частота, Гц", self.cf, "Например 100000000 = 100 МГц.")
+        self._labeled_entry(settings_box, 2, 2, "Полоса приёма, Гц", self.bw, "Обычно не больше sample rate.")
+        self._labeled_entry(settings_box, 2, 3, "Усиление, дБ", self.gain, "Если AGC включен, ручное усиление может игнорироваться.")
+        agc = ttk.Checkbutton(settings_box, text="AGC", variable=self.agc)
+        agc.grid(row=3, column=4, sticky="w", padx=4, pady=(0, 2))
         ToolTip(agc, "Автоматическая регулировка усиления.")
 
-        self._labeled_entry(ana_box, 0, 0, "Размер FFT", self.fft, "Больше FFT — выше разрешение, но выше нагрузка.")
-        self._labeled_entry(ana_box, 0, 1, "Порог детекции, дБ", self.th, "Увеличьте, если ложных срабатываний много.")
-        self._labeled_entry(ana_box, 0, 2, "Кадров подтверждения", self.conf, "Кадры подряд для подтверждения события.")
-        self._labeled_entry(ana_box, 0, 3, "Размер блока", self.block, "Рекомендуется 4096 или 16384.")
-        self._labeled_entry(ana_box, 0, 4, "Строк спектрограммы", self.rows, "Сколько кадров истории показывать.")
+        self.toggle_btn = ttk.Button(settings_box, text="Показать параметры", command=self._toggle_advanced)
+        self.toggle_btn.grid(row=1, column=10, sticky="ew", padx=4, pady=(0, 2))
 
-        self._labeled_entry(det_box, 0, 0, "Мин. длительность, с", self.min_event_duration, "События короче не сохраняются.")
-        self._labeled_entry(det_box, 0, 1, "Мин. полоса, Гц", self.min_bandwidth, "Отсекает узкие шумовые пики.")
-        self._labeled_entry(det_box, 0, 2, "Мин. пик над шумом, дБ", self.min_peak_over_noise, "Минимальный уровень над шумом.")
-        self._labeled_entry(det_box, 0, 3, "Минимум FFT-бинов", self.min_bins_width, "Минимум соседних бинов выше порога.")
+        self.adv_frame = ttk.Frame(settings_box)
+        self.adv_frame.grid(row=4, column=0, columnspan=11, sticky="ew", pady=(2, 0))
+        for c in range(9):
+            self.adv_frame.columnconfigure(c, weight=1)
 
-        ttk.Label(adv_box, text="Wi‑Fi/Bluetooth ~2.4 ГГц и выше. SDRplay RSP1 принимает до 2 ГГц.", foreground="#666666").grid(row=0, column=0, columnspan=5, sticky="w", padx=4, pady=2)
-        self.advanced_box = adv_box
+        self._labeled_entry(self.adv_frame, 0, 0, "FFT", self.fft, "Рекомендуется 4096.")
+        self._labeled_entry(self.adv_frame, 0, 1, "Порог, дБ", self.th, "Выше порог — меньше ложных срабатываний.")
+        self._labeled_entry(self.adv_frame, 0, 2, "Подтверждение", self.conf, "Кадров подряд для подтверждения.")
+        self._labeled_entry(self.adv_frame, 0, 3, "Блок", self.block, "Размер блока I/Q.")
+        self._labeled_entry(self.adv_frame, 0, 4, "Строк", self.rows, "Строки истории waterfall.")
+        self._labeled_entry(self.adv_frame, 0, 5, "Мин. длит., с", self.min_event_duration, "События короче отбрасываются.")
+        self._labeled_entry(self.adv_frame, 0, 6, "Мин. полоса, Гц", self.min_bandwidth, "Отсекает узкие пики.")
+        self._labeled_entry(self.adv_frame, 0, 7, "Мин. пик, дБ", self.min_peak_over_noise, "Минимальный пик над шумом.")
+        self._labeled_entry(self.adv_frame, 0, 8, "Мин. FFT-бинов", self.min_bins_width, "Минимум соседних бинов.")
+        self.adv_frame.grid_remove()
 
-        status_frame = ttk.Frame(root)
-        status_frame.pack(fill="x", pady=(2, 4))
-        ttk.Label(status_frame, textvariable=self.status).pack(anchor="w")
+        controls = ttk.Frame(settings_box)
+        controls.grid(row=3, column=9, columnspan=2, sticky="e", padx=4)
+        ttk.Button(controls, text="Старт", command=self._start).pack(side="left", padx=3)
+        ttk.Button(controls, text="Стоп", command=self._stop).pack(side="left", padx=3)
 
-        plot_frame = ttk.Frame(root)
-        plot_frame.pack(fill="both", expand=True)
-        self.fig = Figure(figsize=(10.5, 4.0))
+        status_frame = ttk.LabelFrame(root, text="Состояние и события", padding=6)
+        status_frame.pack(fill="x", pady=(0, 4))
+        self.status_info = tk.StringVar(value="Состояние: остановлено\nУстройство: —\nИсточник: synthetic\nКадров: 0\nСобытий: 0\nДиапазон: —\nТекущий пик: —\nПоследнее событие: —")
+        ttk.Label(status_frame, textvariable=self.status_info, justify="left").pack(anchor="w")
+        ttk.Label(status_frame, textvariable=self.status).pack(anchor="w", pady=(2, 0))
+
+        self.fig = Figure(figsize=(9, 3.5), dpi=100)
         self.ax = self.fig.add_subplot(111)
         self.img = self.ax.imshow(self.waterfall_data, aspect="auto", origin="lower", cmap="viridis", vmin=-100, vmax=-20, interpolation="nearest")
         self.ax.set_title("Спектрограмма в реальном времени (PSD, дБ)")
         self.ax.set_xlabel("Частота, МГц")
         self.ax.set_ylabel("Кадр")
+        plot_frame = ttk.LabelFrame(root, text="Спектрограмма", padding=4)
+        plot_frame.pack(fill="both", expand=True, pady=(0, 4))
         self.canvas = FigureCanvasTkAgg(self.fig, master=plot_frame)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
 
-        table_wrap = ttk.Frame(root)
-        table_wrap.pack(fill="both", expand=False, pady=(6, 0))
-        self.table = ttk.Treeview(table_wrap, columns=("n", "t", "dur", "freq", "bw", "peak", "status"), show="headings", height=8)
-        headers = {"n": "№", "t": "Время, с", "dur": "Длительность, с", "freq": "Частота, Гц", "bw": "Полоса, Гц", "peak": "Пик, дБ", "status": "Статус"}
-        widths = {"n": 50, "t": 170, "dur": 120, "freq": 150, "bw": 130, "peak": 110, "status": 140}
+        events_frame = ttk.LabelFrame(root, text="Обнаруженные события", padding=4)
+        events_frame.pack(fill="both", expand=True)
+        self.table = ttk.Treeview(events_frame, columns=("n", "t", "dur", "freq", "bw", "peak", "status"), show="headings", height=10)
+        headers = {"n": "№", "t": "Время, с", "dur": "Длительность, с", "freq": "Частота, МГц", "bw": "Полоса, кГц", "peak": "Пик, дБ", "status": "Статус"}
+        widths = {"n": 45, "t": 160, "dur": 120, "freq": 130, "bw": 120, "peak": 90, "status": 120}
         for c in headers:
             self.table.heading(c, text=headers[c])
             self.table.column(c, width=widths[c], anchor="center")
-        yscroll = ttk.Scrollbar(table_wrap, orient="vertical", command=self.table.yview)
-        self.table.configure(yscrollcommand=yscroll.set)
+        t_scroll = ttk.Scrollbar(events_frame, orient="vertical", command=self.table.yview)
+        self.table.configure(yscrollcommand=t_scroll.set)
         self.table.pack(side="left", fill="both", expand=True)
-        yscroll.pack(side="right", fill="y")
+        t_scroll.pack(side="right", fill="y")
 
         self._apply_preset()
+
+    def _toggle_advanced(self) -> None:
+        if self.advanced_visible:
+            self.adv_frame.grid_remove()
+            self.toggle_btn.configure(text="Показать параметры")
+            self.advanced_visible = False
+        else:
+            self.adv_frame.grid()
+            self.toggle_btn.configure(text="Скрыть параметры")
+            self.advanced_visible = True
 
     def _on_frame_configure(self, _event=None) -> None:
         self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
 
     def _on_canvas_configure(self, event) -> None:
-        self.scroll_canvas.itemconfigure(self.canvas_window_id, width=event.width)
+        self.scroll_canvas.itemconfigure(self.canvas_window, width=event.width)
 
     def _on_mousewheel(self, event) -> None:
         self.scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-    def _toggle_advanced(self) -> None:
-        if self.advanced_visible:
-            self.advanced_box.pack_forget()
-            self.advanced_visible = False
-        else:
-            self.advanced_box.pack(fill="x", pady=2)
-            self.advanced_visible = True
-
-    def _show_help(self) -> None:
-        text = (
-            "Для проверки реального SDR используйте FM-радио: 100000000 Гц и нажмите Старт.\n"
-            "Если видны яркие полосы — приёмник получает эфир.\n\n"
-            "SDRplay RSP1 принимает примерно до 2 ГГц. Wi‑Fi/Bluetooth ~2.4 ГГц и выше,\n"
-            "поэтому RSP1 их напрямую не принимает.\n\n"
-            "Частоты для теста: FM 88–108 МГц, 433.92 МГц, 868/915 МГц, ADS-B 1090 МГц, GPS L1 1575.42 МГц."
-        )
-        messagebox.showinfo("Справка по онлайн-режиму", text)
 
     def _apply_preset(self, _event=None) -> None:
         preset = self.PRESETS.get(self.preset_var.get())
@@ -283,14 +261,11 @@ class OnlineWindow:
         try:
             import SoapySDR
         except Exception:
-            messagebox.showwarning(
-                "SDR",
-                "Python не видит модуль SoapySDR.\n\nДля real SDR нужны:\n1) SDRplay API 3.15\n2) PothosSDR\n3) SoapySDRPlay3\n4) Корректный PYTHONPATH\n\nПроверьте:\nSoapySDRUtil.exe --find=\"driver=sdrplay\"\npython -c \"import SoapySDR; print(SoapySDR)\"\n\nSynthetic-режим работает без SoapySDR.",
-            )
+            messagebox.showwarning("SDR", "Python не видит модуль SoapySDR. Synthetic-режим работает без SoapySDR.")
             return
 
-        args_text = self.device_args.get().strip()
         query = {}
+        args_text = self.device_args.get().strip()
         if args_text:
             for part in args_text.split(","):
                 if "=" in part:
@@ -298,7 +273,7 @@ class OnlineWindow:
                     query[k.strip()] = v.strip()
         devs = SoapySDR.Device.enumerate(query if query else None)
         if not devs:
-            messagebox.showinfo("SDR", "SDR-устройство не найдено. Проверьте подключение, драйверы, SDRplay API, PothosSDR и Device args.")
+            messagebox.showinfo("SDR", "SDR-устройство не найдено.")
             return
         lines = [f"Найдено устройств: {len(devs)}\n"]
         for i, d in enumerate(devs, 1):
@@ -316,6 +291,7 @@ class OnlineWindow:
         cfg = self._cfg()
         self.frames_received = 0
         self.events_count = 0
+        self.last_event_text = "—"
         self.table.delete(*self.table.get_children())
         self.waterfall_data = np.full((cfg["max_waterfall_rows"], cfg["fft_size"]), -120.0, dtype=np.float32)
         self.stop_evt.clear()
@@ -363,8 +339,11 @@ class OnlineWindow:
                             self._redraw_latest_psd(now)
                 elif kind == "ev":
                     event_no = self.events_count + 1
-                    self.table.insert("", 0, values=(event_no, f"{payload.start_time_s:.2f}-{payload.end_time_s:.2f}", f"{payload.duration_s:.3f}", f"{payload.center_freq_hz:.0f}", f"{payload.bandwidth_hz:.0f}", f"{payload.peak_power_db:.1f}", "подтверждено"))
+                    freq_mhz = payload.center_freq_hz / 1e6
+                    bw_khz = payload.bandwidth_hz / 1e3
+                    self.table.insert("", 0, values=(event_no, f"{payload.start_time_s:.2f}-{payload.end_time_s:.2f}", f"{payload.duration_s:.3f}", f"{freq_mhz:.3f}", f"{bw_khz:.1f}", f"{payload.peak_power_db:.1f}", "подтв."))
                     self.events_count = event_no
+                    self.last_event_text = f"{freq_mhz:.3f} МГц, {payload.duration_s:.2f} с, {bw_khz:.1f} кГц, {payload.peak_power_db:.1f} дБ"
                 elif kind == "done":
                     self.status.set(f"Статус: завершено | Папка: {payload['run_dir']}")
                 elif kind == "err":
@@ -372,10 +351,12 @@ class OnlineWindow:
                     messagebox.showerror("Ошибка онлайн-режима", str(payload))
         except queue.Empty:
             pass
+
         if self.latest_psd is not None:
             now = time.perf_counter()
             if now - self.last_draw_ts >= self.min_draw_interval_s:
                 self._redraw_latest_psd(now)
+
         self.top.after(100, self._poll)
 
     def _redraw_latest_psd(self, now: float) -> None:
@@ -384,6 +365,7 @@ class OnlineWindow:
         psd = self.latest_psd
         self.waterfall_data = np.roll(self.waterfall_data, -1, axis=0)
         self.waterfall_data[-1, :] = psd
+
         low = float(np.nanpercentile(self.waterfall_data, 5))
         high = float(np.nanpercentile(self.waterfall_data, 95))
         if not np.isfinite(low) or not np.isfinite(high) or high - low < 1.0:
@@ -403,6 +385,18 @@ class OnlineWindow:
         self.last_draw_ts = now
         peak_bin = int(np.argmax(psd))
         peak_freq_hz = cf - sr / 2.0 + (peak_bin / max(len(psd) - 1, 1)) * sr
+        peak_mhz = peak_freq_hz / 1e6
+
+        self.status_info.set(
+            f"Состояние: поток идёт\n"
+            f"Устройство: {self.device_text}\n"
+            f"Источник: {self.source_var.get()}\n"
+            f"Кадров: {self.frames_received}\n"
+            f"Событий: {self.events_count}\n"
+            f"Диапазон: {left:.3f}–{right:.3f} МГц\n"
+            f"Текущий пик: {peak_mhz:.3f} МГц / {np.max(psd):.1f} дБ\n"
+            f"Последнее событие: {self.last_event_text}"
+        )
         self.status.set(
-            f"Статус: поток идёт | Источник: {self.source_var.get()} | Устройство: {self.device_text} | Кадров: {self.frames_received} | Событий: {self.events_count} | Диапазон: {left:.3f}–{right:.3f} МГц | Пик: {peak_freq_hz/1e6:.3f} МГц / {np.max(psd):.1f} дБ | Шум: {self.last_noise_floor_db:.1f} дБ | Порог: {self.last_threshold_db:.1f} дБ"
+            f"Статус: поток идёт | Устройство: {self.device_text} | Кадров: {self.frames_received} | Событий: {self.events_count} | Диапазон: {left:.3f}–{right:.3f} МГц"
         )
